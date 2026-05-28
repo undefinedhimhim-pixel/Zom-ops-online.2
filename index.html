@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zom-Ops Mobile - Online Co-Op</title>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, sans-serif;
+            margin: 0; padding: 0;
+            background: #0a0a0a; color: #fff;
+            overflow: hidden; user-select: none; -webkit-user-select: none;
+        }
+        .game-view { display: none; width: 100vw; height: 100vh; position: relative; }
+        .active-view { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+
+        #menu-screen {
+            background: linear-gradient(rgba(0,0,0,0.8), rgba(0,0,0,0.95)), url('https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=1000') center/cover;
+            text-align: center;
+        }
+        .menu-title { font-size: 36px; font-weight: bold; color: #ff3333; text-shadow: 0 0 10px rgba(255,0,0,0.6); margin-bottom: 15px; letter-spacing: 2px; }
+        .menu-panel { background: rgba(15,15,15,0.9); border: 2px solid #333; border-radius: 12px; padding: 15px; width: 85%; max-width: 400px; margin-bottom: 12px; box-sizing: border-box; }
+        .panel-title { font-size: 14px; font-weight: bold; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+        
+        input, select, .btn {
+            width: 100%; padding: 12px; margin: 5px 0; background: #1a1a1a; border: 1px solid #444;
+            color: #fff; border-radius: 6px; font-weight: bold; font-size: 14px; box-sizing: border-box;
+        }
+        .btn-action { background: #800000; border-color: #ff3333; cursor: pointer; }
+
+        #ui-layer {
+            position: absolute; top: 10px; left: 10px; right: 10px;
+            display: flex; justify-content: space-between;
+            pointer-events: none; font-weight: bold;
+            text-shadow: 2px 2px 4px #000; font-size: 12px; z-index: 10;
+        }
+        
+        /* --- VISUAL HEALTH BAR DESIGN --- */
+        .health-container {
+            width: 140px; height: 16px;
+            background: rgba(50, 10, 10, 0.6);
+            border: 2px solid #555;
+            border-radius: 4px;
+            margin-top: 4px; overflow: hidden;
+            position: relative;
+        }
+        .health-bar-fill {
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg, #c0392b, #e74c3c);
+            transition: width 0.15s ease-out;
+        }
+        .health-text {
+            position: absolute; width: 100%; text-align: center;
+            top: 1px; font-size: 11px; color: #fff; font-weight: bold;
+        }
+
+        .points { color: #55ff55; font-size: 18px; }
+        .wave { color: #ff3333; font-size: 22px; text-align: center; }
+        
+        #gameCanvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        #control-container { position: absolute; bottom: 0; left: 0; width: 100%; height: 260px; z-index: 5; pointer-events: none; }
+        .joystick-base { position: absolute; width: 80px; height: 80px; background: rgba(255,255,255,0.05); border: 2px solid rgba(255,255,255,0.15); border-radius: 50%; pointer-events: auto; }
+        #left-joystick { left: 20px; bottom: 25px; }
+        #right-joystick { right: 20px; bottom: 120px; }
+        #shoot-joystick { right: 20px; bottom: 15px; border-color: rgba(255, 50, 50, 0.4); }
+        .joystick-stick { position: absolute; top: 24px; left: 24px; width: 28px; height: 28px; background: rgba(255,255,255,0.25); border-radius: 50%; }
+        
+        .action-cluster { position: absolute; bottom: 120px; left: 20px; display: flex; flex-direction: column; gap: 8px; pointer-events: auto; }
+        .action-btn {
+            width: 50px; height: 50px; background: rgba(20,20,20,0.85); border: 2px solid #555;
+            border-radius: 50%; color: #fff; font-weight: bold; font-size: 11px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #damage-flash { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,0,0,0); pointer-events: none; z-index: 2; }
+    </style>
+</head>
+<body>
+
+    <div id="menu-screen" class="game-view active-view">
+        <div class="menu-title">ZOM-OPS ONLINE</div>
+        
+        <div class="menu-panel">
+            <div class="panel-title">Multiplayer Deployment Configuration</div>
+            <input type="text" id="lobby-input" placeholder="Enter Lobby Room Code (e.g., SQUAD7)" value="SQUAD7">
+            <input type="text" id="server-url" placeholder="Server URL" value="http://localhost:3000">
+            
+            <select id="map-select">
+                <option value="nacht">Nacht der Untoten</option>
+                <option value="derriese">Der Riese</option>
+            </select>
+        </div>
+
+        <button class="btn btn-action" id="start-match-btn" style="width:85%; max-width:400px;">CONNECT & DEPLOY</button>
+    </div>
+
+    <div id="game-screen" class="game-view">
+        <div id="ui-layer">
+            <div>
+                <div class="health-container">
+                    <div id="hp-bar-fill" class="health-bar-fill"></div>
+                    <div id="hp-text" class="health-text">HP: 100 / 100</div>
+                </div>
+                <div id="weapon-display" style="margin-top: 5px;">M1911 (8/8)</div>
+            </div>
+            <div id="wave-display" class="wave">ROUND 1</div>
+            <div id="points-display" class="points">$500</div>
+        </div>
+
+        <div id="damage-flash"></div>
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="control-container">
+            <div id="left-joystick" class="joystick-base"><div id="left-stick" class="joystick-stick"></div></div>
+            <div id="right-joystick" class="joystick-base"><div id="right-stick" class="joystick-stick"></div></div>
+            <div id="shoot-joystick" class="joystick-base"><div id="shoot-stick" class="joystick-stick"></div></div>
+            
+            <div class="action-cluster">
+                <div class="action-btn" id="swap-btn">SWAP</div>
+                <div class="action-btn" id="reload-btn">RELOAD</div>
+            </div>
+        </div>
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let socket = null;
+let currentRoom = "SQUAD7";
+let networkPlayers = {}; // Contains data profiles of peer clients connected online
+
+// Audio context instantiation
+let audioCtx = null;
+function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+
+function playSoundFX(type) {
+    if (!audioCtx) return;
+    let osc = audioCtx.createOscillator();
+    let gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    let now = audioCtx.currentTime;
+    
+    if (type === 'pistol') {
+        osc.type = 'sawtooth'; osc.frequency.setValueAtTime(350, now);
+        gain.gain.setValueAtTime(0.2, now); gain.gain.linearRampToValueAtTime(0.01, now + 0.1);
+        osc.start(now); osc.stop(now + 0.11);
+    }
+}
+
+// Local Player State Variables
+let player = {
+    x: 150, y: 150, radius: 12, speed: 2.8,
+    hp: 100, maxHp: 100, points: 500, angle: 0,
+    weapons: [{ name: "M1911 Colt", ammo: 8, maxAmmo: 8, reserve: 80 }]
+};
+
+let map = { width: 1600, height: 1600, walls: [] };
+let joysticks = { left: { active: false, vX: 0, vY: 0 }, right: { active: false, vX: 0, vY: 0 }, shoot: { active: false, vX: 0, vY: 0 } };
+
+function registerJoystick(baseId, stickId, ref) {
+    const base = document.getElementById(baseId);
+    const stick = document.getElementById(stickId);
+    base.addEventListener('touchstart', (e) => { e.preventDefault(); initAudio(); ref.active = true; update(e.targetTouches[0]); });
+    base.addEventListener('touchmove', (e) => { e.preventDefault(); update(e.targetTouches[0]); });
+    base.addEventListener('touchend', () => { ref.active = false; ref.vX = 0; ref.vY = 0; stick.style.transform = 'translate(0px,0px)'; });
+    
+    function update(t) {
+        let b = base.getBoundingClientRect();
+        let dx = t.clientX - (b.left + b.width/2); let dy = t.clientY - (b.top + b.height/2);
+        let d = Math.hypot(dx, dy); if (d > 40) { dx = (dx/d)*40; dy = (dy/d)*40; }
+        stick.style.transform = `translate(${dx}px, ${dy}px)`; ref.vX = dx/40; ref.vY = dy/40;
+    }
+}
+registerJoystick('left-joystick', 'left-stick', joysticks.left);
+registerJoystick('right-joystick', 'right-stick', joysticks.right);
+registerJoystick('shoot-joystick', 'shoot-stick', joysticks.shoot);
+
+function updateHealthBarDisplay() {
+    const fillPercent = Math.max(0, (player.hp / player.maxHp) * 100);
+    document.getElementById('hp-bar-fill').style.width = `${fillPercent}%`;
+    document.getElementById('hp-text').innerText = `HP: ${Math.floor(player.hp)} / ${player.maxHp}`;
+}
+
+function initializeNetworkSockets() {
+    const serverUrl = document.getElementById('server-url').value;
+    currentRoom = document.getElementById('lobby-input').value;
+    
+    socket = io(serverUrl);
+
+    socket.on('connect', () => {
+        socket.emit('joinRoom', { roomId: currentRoom, skinColor: '#2980b9' });
+    });
+
+    // Listen for room updates containing metadata profiles of teammate entries
+    socket.on('roomStateUpdate', (roomData) => {
+        networkPlayers = roomData.players;
+        delete networkPlayers[socket.id]; // Exclude self from peer list arrays
+    });
+
+    socket.on('playerMoved', ({ id, x, y, angle, hp }) => {
+        if (!networkPlayers[id]) networkPlayers[id] = {};
+        networkPlayers[id].x = x;
+        networkPlayers[id].y = y;
+        networkPlayers[id].angle = angle;
+        networkPlayers[id].hp = hp;
+    });
+
+    socket.on('peerFireEffect', ({ id, targetX, targetY, weaponType }) => {
+        playSoundFX('pistol');
+    });
+
+    socket.on('playerLeft', (id) => {
+        delete networkPlayers[id];
+    });
+}
+
+function fireActiveWeapon() {
+    let cw = player.weapons[0];
+    if (cw.ammo > 0) {
+        cw.ammo--;
+        playSoundFX('pistol');
+        // Let the server tell everyone else that we fired a shot
+        if (socket && socket.connected) {
+            socket.emit('playerFire', {
+                roomId: currentRoom,
+                targetX: player.x + Math.cos(player.angle) * 100,
+                targetY: player.y + Math.sin(player.angle) * 100,
+                weaponType: 'pistol'
+            });
+        }
+    }
+}
+
+function loop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Track movement velocity inputs
+    if (joysticks.left.active) {
+        player.x += joysticks.left.vX * player.speed;
+        player.y += joysticks.left.vY * player.speed;
+
+        // Emit our position to the server so teammates can track us in real time
+        if (socket && socket.connected) {
+            socket.emit('playerInput', {
+                roomId: currentRoom,
+                x: player.x,
+                y: player.y,
+                angle: player.angle,
+                hp: player.hp
+            });
+        }
+    }
+
+    if (joysticks.right.active) {
+        player.angle = Math.atan2(joysticks.right.vY, joysticks.right.vX);
+    }
+
+    if (joysticks.shoot.active && Math.random() < 0.08) {
+        player.angle = Math.atan2(joysticks.shoot.vY, joysticks.shoot.vX);
+        fireActiveWeapon();
+    }
+
+    // Dynamic Camera Tracking setup offsets
+    let camX = player.x - canvas.width / 2;
+    let camY = player.y - canvas.height / 2;
+
+    ctx.save();
+    ctx.translate(-camX, -camY);
+
+    // Draw Map background grid bounds
+    ctx.fillStyle = '#141414'; ctx.fillRect(0, 0, map.width, map.height);
+
+    // --- RENDER TEAMMATES OVER NETWORK ---
+    for (let id in networkPlayers) {
+        let p = networkPlayers[id];
+        if (p.x !== undefined) {
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.angle);
+            ctx.fillStyle = '#e74c3c'; // Team members render in a crimson accent color tint
+            ctx.beginPath(); ctx.arc(0, 0, player.radius, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    // Draw Local Player Character Token Circle
+    ctx.save();
+    ctx.translate(player.x, player.y);
+    ctx.rotate(player.angle);
+    ctx.fillStyle = '#2980b9';
+    ctx.beginPath(); ctx.arc(0, 0, player.radius, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
+    requestAnimationFrame(loop);
+}
+
+document.getElementById('start-match-btn').addEventListener('click', () => {
+    initAudio();
+    initializeNetworkSockets();
+    
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    document.getElementById('menu-screen').classList.remove('active-view');
+    document.getElementById('game-screen').classList.add('active-view');
+    
+    updateHealthBarDisplay();
+    requestAnimationFrame(loop);
+});
+</script>
+</body>
+</html>
